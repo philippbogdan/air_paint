@@ -33,8 +33,8 @@ class TrackingSettings:
     MAX_NUM_HANDS: int = 1
     DETECTION_SCALE: float = 0.35  # Downscale factor for faster hand detection (smaller = faster)
     # 3D point quality settings
-    MIN_POINT_CONFIDENCE: float = 0.6  # Minimum hand confidence to accept 3D point
-    MAX_REPROJECTION_ERROR: float = 5.0  # Maximum reprojection error in pixels
+    MIN_POINT_CONFIDENCE: float = 0.4  # Minimum hand confidence to accept 3D point
+    MAX_REPROJECTION_ERROR: float = 50.0  # Maximum reprojection error in pixels (relaxed due to distortion mismatch)
     SMOOTHING_ALPHA: float = 0.3  # EMA smoothing factor (higher = more responsive, lower = smoother)
 
 
