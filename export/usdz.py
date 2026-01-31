@@ -111,6 +111,105 @@ def _try_trimesh_usdz(obj_path: Path, output_path: Path) -> bool:
         return False
     except Exception as e:
         print(f"trimesh USDZ export error: {e}")
+        # Fall through to try direct USD export
+        return _try_direct_usd(obj_path, output_path)
+
+
+def _try_direct_usd(obj_path: Path, output_path: Path) -> bool:
+    """Try conversion using Pixar USD library directly."""
+    try:
+        from pxr import Usd, UsdGeom, UsdUtils, Gf, Vt
+        import numpy as np
+
+        # Load OBJ manually
+        vertices = []
+        faces = []
+
+        with open(obj_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith('v '):
+                    parts = line.split()[1:4]
+                    vertices.append([float(p) for p in parts])
+                elif line.startswith('f '):
+                    parts = line.split()[1:]
+                    # OBJ faces are 1-indexed, may have v/vt/vn format
+                    face = []
+                    for p in parts:
+                        idx = int(p.split('/')[0]) - 1
+                        face.append(idx)
+                    faces.append(face)
+
+        if not vertices or not faces:
+            print("OBJ file is empty or invalid")
+            return False
+
+        vertices = np.array(vertices)
+
+        # Create USD stage
+        usda_path = output_path.with_suffix('.usda')
+        stage = Usd.Stage.CreateNew(str(usda_path))
+
+        # Set up axis and units for AR (Y-up, meters)
+        UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.y)
+        UsdGeom.SetStageMetersPerUnit(stage, 0.001)  # mm to meters
+
+        # Create mesh
+        mesh_path = '/Drawing/Mesh'
+        mesh = UsdGeom.Mesh.Define(stage, mesh_path)
+
+        # Set vertices (convert mm to meters for AR)
+        points = [Gf.Vec3f(float(v[0])/1000, float(v[1])/1000, float(v[2])/1000) for v in vertices]
+        mesh.GetPointsAttr().Set(Vt.Vec3fArray(points))
+
+        # Set face vertex counts and indices
+        face_counts = [len(f) for f in faces]
+        face_indices = []
+        for f in faces:
+            face_indices.extend(f)
+
+        mesh.GetFaceVertexCountsAttr().Set(Vt.IntArray(face_counts))
+        mesh.GetFaceVertexIndicesAttr().Set(Vt.IntArray(face_indices))
+
+        # Set subdivision scheme to none (we want hard edges)
+        mesh.GetSubdivisionSchemeAttr().Set('none')
+
+        # Add a simple green material
+        material_path = '/Drawing/Material'
+        from pxr import UsdShade, Sdf
+        material = UsdShade.Material.Define(stage, material_path)
+
+        shader = UsdShade.Shader.Define(stage, f'{material_path}/Shader')
+        shader.CreateIdAttr('UsdPreviewSurface')
+        shader.CreateInput('diffuseColor', Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(0.2, 0.8, 0.3))  # Green
+        shader.CreateInput('metallic', Sdf.ValueTypeNames.Float).Set(0.0)
+        shader.CreateInput('roughness', Sdf.ValueTypeNames.Float).Set(0.5)
+
+        material.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), 'surface')
+
+        # Bind material to mesh
+        UsdShade.MaterialBindingAPI(mesh).Bind(material)
+
+        # Set default prim
+        stage.SetDefaultPrim(stage.GetPrimAtPath('/Drawing'))
+
+        # Save USDA
+        stage.GetRootLayer().Save()
+
+        # Convert to USDZ
+        UsdUtils.CreateNewUsdzPackage(str(usda_path), str(output_path))
+
+        # Clean up intermediate file
+        usda_path.unlink()
+
+        print(f"Converted to USDZ using USD library: {output_path}")
+        return True
+
+    except ImportError as e:
+        print(f"USD library not available: {e}")
+        return False
+    except Exception as e:
+        print(f"USD export error: {e}")
         return False
 
 
