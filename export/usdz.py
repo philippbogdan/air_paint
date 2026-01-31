@@ -146,21 +146,53 @@ def _try_direct_usd(obj_path: Path, output_path: Path) -> bool:
 
         vertices = np.array(vertices)
 
+        # Center the mesh at origin for better AR placement
+        centroid = vertices.mean(axis=0)
+        vertices = vertices - centroid
+
+        # Compute vertex normals for proper lighting
+        normals = np.zeros_like(vertices)
+        for face in faces:
+            if len(face) >= 3:
+                v0, v1, v2 = vertices[face[0]], vertices[face[1]], vertices[face[2]]
+                edge1 = v1 - v0
+                edge2 = v2 - v0
+                face_normal = np.cross(edge1, edge2)
+                norm = np.linalg.norm(face_normal)
+                if norm > 0:
+                    face_normal = face_normal / norm
+                for idx in face:
+                    normals[idx] += face_normal
+
+        # Normalize vertex normals
+        norms = np.linalg.norm(normals, axis=1, keepdims=True)
+        norms[norms == 0] = 1
+        normals = normals / norms
+
         # Create USD stage
         usda_path = output_path.with_suffix('.usda')
         stage = Usd.Stage.CreateNew(str(usda_path))
 
-        # Set up axis and units for AR (Y-up, meters)
+        # Set up axis and units for AR (Y-up, centimeters for better scale)
         UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.y)
-        UsdGeom.SetStageMetersPerUnit(stage, 0.001)  # mm to meters
+        UsdGeom.SetStageMetersPerUnit(stage, 0.01)  # cm
+
+        # Create xform for the drawing
+        xform = UsdGeom.Xform.Define(stage, '/Drawing')
 
         # Create mesh
         mesh_path = '/Drawing/Mesh'
         mesh = UsdGeom.Mesh.Define(stage, mesh_path)
 
-        # Set vertices (convert mm to meters for AR)
-        points = [Gf.Vec3f(float(v[0])/1000, float(v[1])/1000, float(v[2])/1000) for v in vertices]
+        # Set vertices (convert mm to cm for real-world scale)
+        # 1mm = 0.1cm, so divide by 10
+        points = [Gf.Vec3f(float(v[0])/10, float(v[1])/10, float(v[2])/10) for v in vertices]
         mesh.GetPointsAttr().Set(Vt.Vec3fArray(points))
+
+        # Set normals
+        normal_array = [Gf.Vec3f(float(n[0]), float(n[1]), float(n[2])) for n in normals]
+        mesh.GetNormalsAttr().Set(Vt.Vec3fArray(normal_array))
+        mesh.SetNormalsInterpolation(UsdGeom.Tokens.vertex)
 
         # Set face vertex counts and indices
         face_counts = [len(f) for f in faces]
@@ -174,16 +206,20 @@ def _try_direct_usd(obj_path: Path, output_path: Path) -> bool:
         # Set subdivision scheme to none (we want hard edges)
         mesh.GetSubdivisionSchemeAttr().Set('none')
 
-        # Add a simple green material
+        # Enable double-sided rendering
+        mesh.GetDoubleSidedAttr().Set(True)
+
+        # Add a bright red material
         material_path = '/Drawing/Material'
         from pxr import UsdShade, Sdf
         material = UsdShade.Material.Define(stage, material_path)
 
         shader = UsdShade.Shader.Define(stage, f'{material_path}/Shader')
         shader.CreateIdAttr('UsdPreviewSurface')
-        shader.CreateInput('diffuseColor', Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(0.2, 0.8, 0.3))  # Green
+        shader.CreateInput('diffuseColor', Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(1.0, 0.1, 0.1))  # Bright red
         shader.CreateInput('metallic', Sdf.ValueTypeNames.Float).Set(0.0)
-        shader.CreateInput('roughness', Sdf.ValueTypeNames.Float).Set(0.5)
+        shader.CreateInput('roughness', Sdf.ValueTypeNames.Float).Set(0.4)
+        shader.CreateInput('opacity', Sdf.ValueTypeNames.Float).Set(1.0)
 
         material.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), 'surface')
 
@@ -202,7 +238,9 @@ def _try_direct_usd(obj_path: Path, output_path: Path) -> bool:
         # Clean up intermediate file
         usda_path.unlink()
 
-        print(f"Converted to USDZ using USD library: {output_path}")
+        # Print size info
+        bbox_size = vertices.max(axis=0) - vertices.min(axis=0)
+        print(f"Converted to USDZ: {output_path.name} (size: {bbox_size[0]/10:.1f} x {bbox_size[1]/10:.1f} x {bbox_size[2]/10:.1f} cm)")
         return True
 
     except ImportError as e:
@@ -210,6 +248,8 @@ def _try_direct_usd(obj_path: Path, output_path: Path) -> bool:
         return False
     except Exception as e:
         print(f"USD export error: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
