@@ -454,6 +454,121 @@ class MainWindow:
 
         return composed
 
+    def draw_save_progress(
+        self,
+        image: np.ndarray,
+        progress: float,
+        message: str,
+        is_complete: bool = False,
+        is_failed: bool = False
+    ) -> np.ndarray:
+        """
+        Draw save progress overlay on image.
+
+        Args:
+            image: Image to draw on
+            progress: Progress 0.0 to 1.0
+            message: Status message
+            is_complete: Whether save is complete
+            is_failed: Whether save failed
+
+        Returns:
+            Image with progress overlay
+        """
+        h, w = image.shape[:2]
+
+        # Draw semi-transparent full overlay
+        overlay = image.copy()
+        cv2.rectangle(overlay, (0, 0), (w, h), (0, 0, 0), -1)
+        cv2.addWeighted(overlay, 0.7, image, 0.3, 0, image)
+
+        # Center box
+        box_w, box_h = 400, 120
+        box_x = (w - box_w) // 2
+        box_y = (h - box_h) // 2
+
+        # Box background
+        cv2.rectangle(
+            image,
+            (box_x, box_y),
+            (box_x + box_w, box_y + box_h),
+            (40, 40, 40),
+            -1
+        )
+        cv2.rectangle(
+            image,
+            (box_x, box_y),
+            (box_x + box_w, box_y + box_h),
+            (100, 100, 100),
+            2
+        )
+
+        # Title
+        if is_failed:
+            title = "SAVE FAILED"
+            title_color = (0, 0, 255)
+        elif is_complete:
+            title = "SAVE COMPLETE"
+            title_color = (0, 255, 0)
+        else:
+            title = "SAVING..."
+            title_color = (255, 255, 255)
+
+        cv2.putText(
+            image, title,
+            (box_x + 20, box_y + 35),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.8, title_color, 2
+        )
+
+        # Progress bar background
+        bar_x = box_x + 20
+        bar_y = box_y + 55
+        bar_w = box_w - 40
+        bar_h = 25
+
+        cv2.rectangle(
+            image,
+            (bar_x, bar_y),
+            (bar_x + bar_w, bar_y + bar_h),
+            (60, 60, 60),
+            -1
+        )
+
+        # Progress bar fill
+        fill_w = int(bar_w * progress)
+        if fill_w > 0:
+            if is_failed:
+                bar_color = (0, 0, 255)
+            elif is_complete:
+                bar_color = (0, 255, 0)
+            else:
+                bar_color = (0, 200, 255)  # Orange
+
+            cv2.rectangle(
+                image,
+                (bar_x, bar_y),
+                (bar_x + fill_w, bar_y + bar_h),
+                bar_color,
+                -1
+            )
+
+        # Progress percentage
+        pct_text = f"{int(progress * 100)}%"
+        cv2.putText(
+            image, pct_text,
+            (bar_x + bar_w // 2 - 20, bar_y + 18),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1
+        )
+
+        # Status message
+        cv2.putText(
+            image, message[:45],  # Truncate long messages
+            (box_x + 20, box_y + 105),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1
+        )
+
+        return image
+
     def show(self, image: np.ndarray) -> None:
         """
         Display an image in the window.

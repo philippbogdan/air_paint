@@ -35,7 +35,7 @@ from tracking.aruco import ArucoDetector, MarkerPose
 from drawing.manager import DrawingManager
 from ui.input import InputHandler, InputAction
 from ui.window import MainWindow
-from export.mesh import generate_tube_mesh, save_stl, save_obj
+from export.saver import SessionSaver
 
 
 class AirPaintingApp:
@@ -67,9 +67,11 @@ class AirPaintingApp:
         self.drawing_manager: Optional[DrawingManager] = None
         self.input_handler: Optional[InputHandler] = None
         self.window: Optional[MainWindow] = None
+        self.saver: Optional[SessionSaver] = None
 
         # State
         self._running = False
+        self._save_complete_time: Optional[float] = None  # For auto-dismiss
         self._last_composed_frame: Optional[np.ndarray] = None
         self._fps = 0.0
         self._frame_times = []
@@ -158,6 +160,9 @@ class AirPaintingApp:
 
         # Initialize window
         self.window = MainWindow()
+
+        # Initialize background saver
+        self.saver = SessionSaver()
 
         print("\nSetup complete!")
         print("\n" + "=" * 40)
@@ -248,37 +253,45 @@ class AirPaintingApp:
         """Handle save."""
         self._save_session()
 
-    def _save_session(self) -> None:
-        """Save the current session."""
-        if self.drawing_manager.get_stats().total_strokes == 0:
+    def _save_session(self, blocking: bool = False) -> None:
+        """
+        Save the current session.
+
+        Args:
+            blocking: If True, wait for save to complete (used during cleanup)
+        """
+        if self.saver.is_saving:
+            print("Save already in progress...")
+            return
+
+        stats = self.drawing_manager.get_stats()
+        if stats.total_strokes == 0:
             print("No strokes to save")
             return
 
-        # Save session (JSON + screenshot)
-        session_dir = self.drawing_manager.save_session(
-            screenshot=self._last_composed_frame
+        # Start async save
+        started = self.saver.save_async(
+            strokes=self.drawing_manager.all_strokes,
+            stats_dict=stats.to_dict(),
+            screenshot=self._last_composed_frame,
+            session_start=self.drawing_manager._session_start,
+            coordinate_frame=self.drawing_manager.coordinate_frame,
+            marker_metadata=self.drawing_manager._marker_metadata
         )
 
-        # Also export mesh files
-        strokes = self.drawing_manager.all_strokes
-        vertices, faces = generate_tube_mesh(strokes)
+        if started:
+            print("Saving session in background...")
+            self._save_complete_time = None
 
-        if len(vertices) > 0:
-            # Save STL
-            stl_path = session_dir / "drawing.stl"
-            save_stl(vertices, faces, stl_path)
-
-            # Save OBJ
-            obj_path = session_dir / "drawing.obj"
-            save_obj(vertices, faces, obj_path)
-
-            # Try USDZ conversion
-            from export.usdz import convert_to_usdz
-            usdz_path = convert_to_usdz(obj_path)
-            if usdz_path:
-                print(f"USDZ exported: {usdz_path}")
-
-        print(f"\nSession saved to: {session_dir}")
+        # If blocking, wait for completion
+        if blocking and started:
+            while self.saver.is_saving:
+                time.sleep(0.1)
+            progress = self.saver.progress
+            if progress.is_complete:
+                print(f"Session saved to: {progress.output_dir}")
+            elif progress.is_failed:
+                print(f"Save failed: {progress.error}")
 
     def _update_fps(self) -> None:
         """Update FPS calculation."""
@@ -390,6 +403,51 @@ class AirPaintingApp:
             )
 
             self._last_composed_frame = composed
+
+            # Show save progress overlay if saving
+            if self.saver.is_saving or self._save_complete_time is not None:
+                progress = self.saver.progress
+
+                # Check if just completed
+                if progress.is_complete and self._save_complete_time is None:
+                    self._save_complete_time = time.time()
+                    print(f"Session saved to: {progress.output_dir}")
+
+                # Auto-dismiss after 2 seconds
+                if self._save_complete_time is not None:
+                    elapsed = time.time() - self._save_complete_time
+                    if elapsed > 2.0:
+                        self._save_complete_time = None
+                        self.saver.reset()
+                    else:
+                        # Still showing completion
+                        composed = self.window.draw_save_progress(
+                            composed,
+                            progress.progress,
+                            progress.message,
+                            is_complete=progress.is_complete,
+                            is_failed=progress.is_failed
+                        )
+                elif progress.is_failed:
+                    # Show failure until dismissed
+                    composed = self.window.draw_save_progress(
+                        composed,
+                        progress.progress,
+                        progress.message,
+                        is_complete=False,
+                        is_failed=True
+                    )
+                    # Auto-dismiss failure after 3 seconds
+                    if self._save_complete_time is None:
+                        self._save_complete_time = time.time()
+                else:
+                    # Show progress
+                    composed = self.window.draw_save_progress(
+                        composed,
+                        progress.progress,
+                        progress.message
+                    )
+
             self.window.show(composed)
 
             # Handle input
@@ -414,7 +472,7 @@ class AirPaintingApp:
 
         # Offer to save if there are unsaved strokes
         if self.drawing_manager and self.drawing_manager.get_stats().total_strokes > 0:
-            self._save_session()
+            self._save_session(blocking=True)
 
         # Release resources
         if self.capture:
