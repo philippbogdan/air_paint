@@ -238,15 +238,15 @@ class ServerVisualizer:
         h, w = frame.shape[:2]
 
         if calibration_mode:
-            # Big calibration mode indicator
+            # Setup mode - waiting for ArUco
             cv2.rectangle(frame, (0, 0), (w, 60), (0, 0, 100), -1)
-            cv2.putText(frame, "CALIBRATION MODE", (w // 2 - 150, 35),
+            cv2.putText(frame, "SETUP MODE", (w // 2 - 100, 35),
                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2)
-            cv2.putText(frame, "Point marker at BOTH cameras", (w // 2 - 180, 55),
+            cv2.putText(frame, "Show ArUco marker, press SPACE to lock origin", (w // 2 - 230, 55),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
         elif dynamic_calibrated:
-            # Small calibrated indicator
-            cv2.putText(frame, "CALIBRATED", (w - 130, 30),
+            # Origin locked indicator
+            cv2.putText(frame, "ORIGIN LOCKED", (w - 150, 30),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
         return frame

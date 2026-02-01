@@ -40,6 +40,11 @@ from .visualizer import ServerVisualizer
 @dataclass
 class LocalServerState:
     """Mutable state for the local camera server."""
+    # Two-phase state machine
+    # Phase 1: "setup" - waiting for ArUco + HID click to establish world center
+    # Phase 2: "drawing" - HID clicks toggle drawing
+    phase: str = "setup"
+
     # Drawing state
     is_drawing: bool = False
     current_stroke_id: int = 0
@@ -52,8 +57,9 @@ class LocalServerState:
     marker_visible_b: bool = False
     marker_pose: Optional[MarkerPose] = None
 
-    # World coordinate state
+    # World coordinate state - locked transform from ArUco
     world_locked: bool = False
+    locked_T_CW: Optional[np.ndarray] = None  # Camera-to-World transform when locked
 
     # Performance metrics
     fps: float = 0.0
@@ -123,6 +129,11 @@ class LocalCameraServer:
         self._last_frame_b: Optional[np.ndarray] = None
         self._last_hand_a = None
         self._last_hand_b = None
+
+        # Pending actions from sync handlers (processed in async frame loop)
+        self._pending_world_anchor = False
+        self._pending_stroke_start = False
+        self._pending_stroke_end = False
 
     def setup(self) -> bool:
         """
@@ -199,16 +210,45 @@ class LocalCameraServer:
         print("\n" + "=" * 60)
         print("Setup complete!")
         print("=" * 60)
+        print("\nFLOW:")
+        print("  1. Show ArUco marker to camera A")
+        print("  2. Press SPACE/HID to lock world origin")
+        print("  3. Remove ArUco marker")
+        print("  4. Press SPACE/HID to toggle drawing on/off")
         print("\nControls:")
-        print("  SPACE or HID button: Toggle drawing")
+        print("  SPACE or HID button: Lock origin / Toggle drawing")
         print("  Q/ESC: Quit")
         print("=" * 60)
+        print("\n>>> Show ArUco marker and press SPACE to lock origin <<<\n")
 
         return True
 
     def _on_hid_button(self) -> None:
-        """Called when Bluetooth HID button (Volume Up) is pressed."""
-        self._toggle_drawing()
+        """
+        Called when Bluetooth HID button (Volume Up) or SPACE is pressed.
+
+        Two-phase behavior:
+        1. Setup phase: If ArUco visible, lock world center and switch to drawing phase
+        2. Drawing phase: Toggle drawing on/off
+        """
+        if self.state.phase == "setup":
+            # In setup phase - try to lock world center
+            if self.state.marker_pose is not None:
+                # ArUco is visible - lock world center
+                self.state.world_locked = True
+                self.state.locked_T_CW = self.state.marker_pose.T_CW.copy()
+                self.state.phase = "drawing"
+                self._pending_world_anchor = True  # Send to iPhone
+                print("=" * 60)
+                print("WORLD ORIGIN LOCKED!")
+                print("You can now remove the ArUco marker.")
+                print("Press SPACE/HID to toggle drawing on/off.")
+                print("=" * 60)
+            else:
+                print("ArUco marker not visible - show marker and press again")
+        else:
+            # In drawing phase - toggle drawing
+            self._toggle_drawing()
 
     def cleanup(self) -> None:
         """Release all resources."""
@@ -312,9 +352,11 @@ class LocalCameraServer:
             self.state.points_in_current_stroke = 0
             if self.point_smoother:
                 self.point_smoother.reset()
+            self._pending_stroke_start = True  # Send to iPhone
             print(f"Drawing ON - Stroke #{self.state.current_stroke_id}")
         else:
             self.state.total_strokes += 1
+            self._pending_stroke_end = True  # Send to iPhone
             print(f"Drawing OFF - Stroke #{self.state.current_stroke_id} "
                   f"({self.state.points_in_current_stroke} points)")
 
@@ -381,19 +423,39 @@ class LocalCameraServer:
         self.state.marker_visible_b = marker_pose_b is not None
         self.state.marker_pose = marker_pose_a
 
-        # Update visualizer marker pose for 2D stroke projection
-        if marker_pose_a is not None and self.visualizer is not None:
+        # Update visualizer marker pose for 2D stroke projection (only in setup phase)
+        if marker_pose_a is not None and self.visualizer is not None and self.state.phase == "setup":
             self.visualizer.set_marker_pose(marker_pose_a.rvec, marker_pose_a.tvec)
 
-        # Send world anchor update if marker visible
-        if marker_pose_a is not None:
+        # Handle pending messages from sync HID handler
+        if self._pending_world_anchor and self.state.locked_T_CW is not None:
+            # Send locked world anchor to iPhone
+            # T_WC is the inverse of T_CW (World-to-Camera)
+            T_WC = np.linalg.inv(self.state.locked_T_CW)
             anchor_msg = WorldAnchorMessage.from_matrix(
-                marker_pose_a.T_WC,
-                marker_id=marker_pose_a.marker_id,
+                T_WC,
+                marker_id=ARUCO.MARKER_ID,
                 marker_size_mm=ARUCO.MARKER_SIZE_MM,
                 visible=True
             )
             await self._broadcast(serialize_message(anchor_msg))
+            self._pending_world_anchor = False
+
+        if self._pending_stroke_start:
+            msg = StrokeStartMessage(
+                stroke_id=self.state.current_stroke_id,
+                color=[1.0, 0.0, 0.0],  # Red
+            )
+            await self._broadcast(serialize_message(msg))
+            self._pending_stroke_start = False
+
+        if self._pending_stroke_end:
+            msg = StrokeEndMessage(
+                stroke_id=self.state.current_stroke_id,
+                point_count=self.state.points_in_current_stroke,
+            )
+            await self._broadcast(serialize_message(msg))
+            self._pending_stroke_end = False
 
         # Run hand detection on both frames (parallel)
         loop = asyncio.get_event_loop()
@@ -429,13 +491,15 @@ class LocalCameraServer:
                 point_3d = self.triangulator.triangulate(point_a, point_b)
 
                 if point_3d is not None:
-                    print(f"[POINT] 3D: {point_3d[0]:.1f}, {point_3d[1]:.1f}, {point_3d[2]:.1f} mm")
+                    # Transform to world coordinates using LOCKED transform
+                    # (not the current marker pose, since marker may be removed)
+                    if self.state.world_locked and self.state.locked_T_CW is not None:
+                        # Apply locked camera-to-world transform
+                        point_h = np.array([point_3d[0], point_3d[1], point_3d[2], 1.0])
+                        point_world_h = self.state.locked_T_CW @ point_h
+                        point_3d = point_world_h[:3]
 
-                    # Transform to world coordinates if marker visible
-                    if self.state.marker_pose is not None and self.aruco_detector_a is not None:
-                        point_3d = self.aruco_detector_a.transform_point_to_world(
-                            point_3d, self.state.marker_pose
-                        )
+                    print(f"[POINT] 3D: {point_3d[0]:.1f}, {point_3d[1]:.1f}, {point_3d[2]:.1f} mm")
 
                     # Apply smoothing
                     if self.point_smoother is not None:
@@ -443,8 +507,8 @@ class LocalCameraServer:
 
                     self.state.last_point_3d = point_3d
 
-                    # Send point if drawing
-                    if self.state.is_drawing:
+                    # Send point if in drawing phase AND drawing is ON
+                    if self.state.phase == "drawing" and self.state.is_drawing:
                         error_a, error_b = self.triangulator.compute_reprojection_error(
                             point_a, point_b, point_3d
                         )
@@ -501,14 +565,14 @@ class LocalCameraServer:
             marker_visible_webcam=self.state.marker_visible_b,
             fps=self.state.fps,
             is_drawing=self.state.is_drawing,
-            calibration_mode=False,
-            dynamic_calibrated=True,
+            calibration_mode=(self.state.phase == "setup"),  # Show "point ArUco" message
+            dynamic_calibrated=self.state.world_locked,  # Show "CALIBRATED" when locked
             K_glasses=self.calibration.K1 if self.calibration else None,
             D_glasses=self.calibration.D1 if self.calibration else None
         )
 
         if result == "toggle_drawing":
-            self._toggle_drawing()
+            self._on_hid_button()  # Use two-phase logic
             return True
 
         return result if isinstance(result, bool) else True
