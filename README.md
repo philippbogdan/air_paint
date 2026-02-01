@@ -8,92 +8,107 @@ Draw in the air with your finger. Two webcams track it in 3D. See it on your iPh
 
 ### Stereo Geometry
 
-Two cameras see the same point from different positions. Given their relative pose, we can triangulate the 3D position.
+Two cameras observe the same point from different positions. Given their relative pose, we triangulate the 3D position.
 
-**Camera intrinsic matrix** (per camera):
-```
-    [ fx   0  cx ]
-K = [  0  fy  cy ]
-    [  0   0   1 ]
-```
-- `fx, fy`: focal lengths in pixels
-- `cx, cy`: principal point (image center)
+**Camera Intrinsic Matrix** (per camera):
 
-**Distortion coefficients**:
-```
-D = [k1, k2, p1, p2, k3]
-```
-Radial (`k`) and tangential (`p`) lens distortion.
+$$
+K = \begin{bmatrix} f_x & 0 & c_x \\ 0 & f_y & c_y \\ 0 & 0 & 1 \end{bmatrix}
+$$
+
+where $f_x, f_y$ are focal lengths in pixels and $(c_x, c_y)$ is the principal point.
+
+**Distortion Coefficients**:
+
+$$
+D = \begin{bmatrix} k_1 & k_2 & p_1 & p_2 & k_3 \end{bmatrix}
+$$
+
+where $k_i$ are radial and $p_i$ are tangential distortion parameters.
 
 ### Stereo Calibration
 
-Camera B's pose relative to Camera A:
-```
-R = 3x3 rotation matrix
-T = 3x1 translation vector (baseline)
-```
+Camera B's pose relative to Camera A is defined by:
 
-**Projection matrices**:
-```
-P1 = K1 @ [I | 0]        # Camera A at origin
-P2 = K2 @ [R | T]        # Camera B offset by R, T
-```
+$$
+R \in SO(3), \quad T \in \mathbb{R}^3
+$$
+
+**Projection Matrices**:
+
+$$
+P_1 = K_1 \begin{bmatrix} I & \mathbf{0} \end{bmatrix}, \quad P_2 = K_2 \begin{bmatrix} R & T \end{bmatrix}
+$$
+
+Camera A is at the origin; Camera B is offset by rotation $R$ and translation $T$ (baseline).
 
 ### Triangulation
 
-Given 2D point `(u, v)` in each camera, solve:
+Given corresponding 2D points $\mathbf{x}_1 = (u_1, v_1)$ and $\mathbf{x}_2 = (u_2, v_2)$, we solve for $\mathbf{X} = (X, Y, Z, W)^T$ in homogeneous coordinates:
 
-```
-         [ u1 * P1[2,:] - P1[0,:] ]       [ 0 ]
-         [ v1 * P1[2,:] - P1[1,:] ]       [ 0 ]
-A * X =  [ u2 * P2[2,:] - P2[0,:] ] * X = [ 0 ]
-         [ v2 * P2[2,:] - P2[1,:] ]       [ 0 ]
-```
+$$
+A \mathbf{X} = \mathbf{0}
+$$
 
-Solve via SVD. `X` is the 3D point in homogeneous coordinates:
-```
-X = [x, y, z, w]^T
-point_3d = [x/w, y/w, z/w]
-```
+where:
+
+$$
+A = \begin{bmatrix} u_1 P_1^{3T} - P_1^{1T} \\ v_1 P_1^{3T} - P_1^{2T} \\ u_2 P_2^{3T} - P_2^{1T} \\ v_2 P_2^{3T} - P_2^{2T} \end{bmatrix}
+$$
+
+Solved via SVD. The 3D point is recovered as:
+
+$$
+\mathbf{X}_{3D} = \begin{bmatrix} X/W \\ Y/W \\ Z/W \end{bmatrix}
+$$
 
 ### Reprojection Error
 
-Quality check—project 3D point back to 2D and measure pixel distance:
-```
-projected = P @ [X, Y, Z, 1]^T
-u' = projected[0] / projected[2]
-v' = projected[1] / projected[2]
+Quality metric—project the 3D point back to 2D and measure deviation:
 
-error = sqrt((u - u')^2 + (v - v')^2)
-```
+$$
+\hat{\mathbf{x}} = \pi(P \cdot \mathbf{X}_h) = \begin{bmatrix} \hat{u} \\ \hat{v} \end{bmatrix}
+$$
+
+$$
+\epsilon = \sqrt{(u - \hat{u})^2 + (v - \hat{v})^2}
+$$
+
+Points with $\epsilon > \tau$ are rejected as outliers.
 
 ### World Transform (ArUco)
 
-ArUco marker detection gives rotation `rvec` and translation `tvec`.
+ArUco marker detection yields rotation vector $\mathbf{r}$ and translation vector $\mathbf{t}$.
 
-Convert to 4x4 transform:
-```
-R, _ = cv2.Rodrigues(rvec)
+Convert to rotation matrix via Rodrigues' formula:
 
-        [ R   | tvec ]
-T_CW =  [-----+------]    # Camera to World
-        [ 0 0 0 |  1  ]
+$$
+R = I + \sin\theta \cdot [\mathbf{k}]_\times + (1 - \cos\theta) \cdot [\mathbf{k}]_\times^2
+$$
 
-T_WC = inverse(T_CW)      # World to Camera
-```
+where $\theta = \|\mathbf{r}\|$ and $\mathbf{k} = \mathbf{r}/\theta$.
+
+**Camera-to-World Transform**:
+
+$$
+T_{CW} = \begin{bmatrix} R & \mathbf{t} \\ \mathbf{0}^T & 1 \end{bmatrix} \in SE(3)
+$$
 
 Transform points from camera frame to world frame:
-```
-point_world = T_CW @ [x, y, z, 1]^T
-```
+
+$$
+\mathbf{X}_W = T_{CW} \cdot \begin{bmatrix} \mathbf{X}_C \\ 1 \end{bmatrix}
+$$
 
 ### Point Smoothing
 
-Exponential moving average to reduce jitter:
-```
-smoothed = α * current + (1 - α) * previous
-```
-`α = 0.5` balances responsiveness and stability.
+Exponential moving average reduces jitter:
+
+$$
+\mathbf{X}_t^{smooth} = \alpha \cdot \mathbf{X}_t + (1 - \alpha) \cdot \mathbf{X}_{t-1}^{smooth}
+$$
+
+where $\alpha = 0.5$ balances responsiveness and stability.
 
 ---
 
