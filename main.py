@@ -8,6 +8,7 @@ toggled by spacebar or Bluetooth shutter button.
 
 Usage:
     python main.py [--calibrate] [--camera-a INDEX] [--camera-b INDEX]
+    python main.py --server-local [--port 8765] [--camera-a 0] [--camera-b 1]  # WebSocket server with local cameras
 
 Controls:
     SPACE - Toggle drawing on/off
@@ -523,6 +524,17 @@ def main():
         action="store_true",
         help="Interactively select cameras with visual preview"
     )
+    parser.add_argument(
+        "--server-local",
+        action="store_true",
+        help="Run as WebSocket server with local dual cameras (iPhone is viewer only)"
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8765,
+        help="WebSocket server port (default: 8765, only used with --server-local)"
+    )
 
     args = parser.parse_args()
 
@@ -557,6 +569,30 @@ def main():
         cam_a = args.camera_a if args.camera_a != CAMERA.CAMERA_A_INDEX else None
         cam_b = args.camera_b if args.camera_b != CAMERA.CAMERA_B_INDEX else None
         run_calibration(camera_a=cam_a, camera_b=cam_b, interactive=args.interactive)
+        return
+
+    if args.server_local:
+        # Run WebSocket server with local dual cameras
+        import asyncio
+        from server.local_camera_server import LocalCameraServer
+
+        server = LocalCameraServer(
+            port=args.port,
+            camera_a_index=args.camera_a,
+            camera_b_index=args.camera_b
+        )
+
+        if not server.setup():
+            print("Server setup failed!")
+            return
+
+        try:
+            asyncio.run(server.run())
+        except KeyboardInterrupt:
+            print("\nInterrupted by user")
+        finally:
+            server.stop()
+            server.cleanup()
         return
 
     # Camera selection

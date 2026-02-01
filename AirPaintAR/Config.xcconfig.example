@@ -1,0 +1,10 @@
+// AirPaintAR Configuration
+// Copy this file to Config.xcconfig and fill in your values
+// Config.xcconfig is gitignored and should never be committed
+
+// =============================================================================
+// Meta Wearables SDK
+// Get from Meta Developer Portal: https://developers.meta.com
+// =============================================================================
+CLIENT_TOKEN = your_meta_client_token_here
+META_APP_ID = your_meta_app_id_here
