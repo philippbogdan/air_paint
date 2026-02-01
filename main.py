@@ -8,6 +8,7 @@ toggled by spacebar or Bluetooth shutter button.
 
 Usage:
     python main.py [--calibrate] [--camera-a INDEX] [--camera-b INDEX]
+    python main.py --server [--port 8765] [--camera 0]  # WebSocket server mode for AR
 
 Controls:
     SPACE - Toggle drawing on/off
@@ -523,6 +524,23 @@ def main():
         action="store_true",
         help="Interactively select cameras with visual preview"
     )
+    parser.add_argument(
+        "--server",
+        action="store_true",
+        help="Run as WebSocket server for real-time AR mode (receives frames from iPhone)"
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8765,
+        help="WebSocket server port (default: 8765, only used with --server)"
+    )
+    parser.add_argument(
+        "--camera",
+        type=int,
+        default=0,
+        help="Mac webcam index for server mode (default: 0, only used with --server)"
+    )
 
     args = parser.parse_args()
 
@@ -557,6 +575,26 @@ def main():
         cam_a = args.camera_a if args.camera_a != CAMERA.CAMERA_A_INDEX else None
         cam_b = args.camera_b if args.camera_b != CAMERA.CAMERA_B_INDEX else None
         run_calibration(camera_a=cam_a, camera_b=cam_b, interactive=args.interactive)
+        return
+
+    if args.server:
+        # Run WebSocket server for real-time AR mode
+        import asyncio
+        from server.websocket_server import AirPaintServer
+
+        server = AirPaintServer(port=args.port, camera_index=args.camera)
+
+        if not server.setup():
+            print("Server setup failed!")
+            return
+
+        try:
+            asyncio.run(server.run())
+        except KeyboardInterrupt:
+            print("\nInterrupted by user")
+        finally:
+            server.stop()
+            server.cleanup()
         return
 
     # Camera selection

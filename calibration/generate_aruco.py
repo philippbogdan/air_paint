@@ -97,6 +97,39 @@ def main():
     cv2.imwrite(str(jpg_path), image, [cv2.IMWRITE_JPEG_QUALITY, 100])
     print(f"Saved to: {jpg_path}")
 
+    # Save a version for iOS assets (named aruco_marker_0.png)
+    ios_assets_path = output_dir / "AirPaintAR" / "AirPaintAR" / "Assets.xcassets"
+    if ios_assets_path.exists():
+        # Save directly in the assets folder for easy import
+        ios_marker_path = ios_assets_path / f"aruco_marker_{MARKER_ID}.imageset"
+        ios_marker_path.mkdir(exist_ok=True)
+
+        # Save the image
+        cv2.imwrite(str(ios_marker_path / f"aruco_marker_{MARKER_ID}.png"), image)
+
+        # Create Contents.json for the asset
+        contents_json = '''{
+  "images" : [
+    {
+      "filename" : "aruco_marker_0.png",
+      "idiom" : "universal",
+      "scale" : "1x"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}'''
+        (ios_marker_path / "Contents.json").write_text(contents_json)
+        print(f"Saved iOS asset to: {ios_marker_path}")
+    else:
+        # Just save in the output directory
+        ios_path = output_dir / f"aruco_marker_{MARKER_ID}.png"
+        cv2.imwrite(str(ios_path), image)
+        print(f"Saved iOS marker to: {ios_path}")
+        print(f"  (Add this to AirPaintAR Assets.xcassets as 'aruco_marker_0')")
+
     # Print instructions
     print("\n" + "=" * 60)
     print("PRINTING INSTRUCTIONS")

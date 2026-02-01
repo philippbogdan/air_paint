@@ -8,3 +8,4 @@ pyobjc-framework-AVFoundation>=10.0  # macOS camera name detection
 pynput>=1.7.6  # Global keyboard/HID event capture
 qrcode>=7.4.0  # QR code generation for AR serving
 usd-core>=24.0  # Pixar USD for USDZ export
+websockets>=12.0  # Async WebSocket server for real-time AR mode
