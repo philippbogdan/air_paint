@@ -13,11 +13,6 @@
 		004 /* Protocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 104 /* Protocol.swift */; };
 		005 /* WebSocketClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 105 /* WebSocketClient.swift */; };
 		006 /* DrawingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 106 /* DrawingViewModel.swift */; };
-		007 /* GlassesStreamViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 107 /* GlassesStreamViewModel.swift */; };
-		008 /* WearablesViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 109 /* WearablesViewModel.swift */; };
-		020AC3C62F2EDB8300E92F80 /* MWDATCamera in Frameworks */ = {isa = PBXBuildFile; productRef = 020AC3C52F2EDB8300E92F80 /* MWDATCamera */; };
-		020AC3C82F2EDB8300E92F80 /* MWDATCore in Frameworks */ = {isa = PBXBuildFile; productRef = 020AC3C72F2EDB8300E92F80 /* MWDATCore */; };
-		020AC3CA2F2EDB8300E92F80 /* MWDATMockDevice in Frameworks */ = {isa = PBXBuildFile; productRef = 020AC3C92F2EDB8300E92F80 /* MWDATMockDevice */; };
 		027353A72F2F11B80048E7BC /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 027353A62F2F11B80048E7BC /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -30,9 +25,7 @@
 		104 /* Protocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Protocol.swift; sourceTree = "<group>"; };
 		105 /* WebSocketClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketClient.swift; sourceTree = "<group>"; };
 		106 /* DrawingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingViewModel.swift; sourceTree = "<group>"; };
-		107 /* GlassesStreamViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassesStreamViewModel.swift; sourceTree = "<group>"; };
 		108 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		109 /* WearablesViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WearablesViewModel.swift; sourceTree = "<group>"; };
 		120 /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
@@ -41,9 +34,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				020AC3C62F2EDB8300E92F80 /* MWDATCamera in Frameworks */,
-				020AC3CA2F2EDB8300E92F80 /* MWDATMockDevice in Frameworks */,
-				020AC3C82F2EDB8300E92F80 /* MWDATCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -87,8 +77,6 @@
 			isa = PBXGroup;
 			children = (
 				106 /* DrawingViewModel.swift */,
-				107 /* GlassesStreamViewModel.swift */,
-				109 /* WearablesViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -169,7 +157,6 @@
 			);
 			mainGroup = 300;
 			packageReferences = (
-				020AC3C42F2EDB8300E92F80 /* XCRemoteSwiftPackageReference "meta-wearables-dat-ios" */,
 			);
 			productRefGroup = 320 /* Products */;
 			projectDirPath = "";
@@ -202,8 +189,6 @@
 				004 /* Protocol.swift in Sources */,
 				005 /* WebSocketClient.swift in Sources */,
 				006 /* DrawingViewModel.swift in Sources */,
-				007 /* GlassesStreamViewModel.swift in Sources */,
-				008 /* WearablesViewModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -415,35 +400,6 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
-
-/* Begin XCRemoteSwiftPackageReference section */
-		020AC3C42F2EDB8300E92F80 /* XCRemoteSwiftPackageReference "meta-wearables-dat-ios" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/facebook/meta-wearables-dat-ios";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 0.3.0;
-			};
-		};
-/* End XCRemoteSwiftPackageReference section */
-
-/* Begin XCSwiftPackageProductDependency section */
-		020AC3C52F2EDB8300E92F80 /* MWDATCamera */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 020AC3C42F2EDB8300E92F80 /* XCRemoteSwiftPackageReference "meta-wearables-dat-ios" */;
-			productName = MWDATCamera;
-		};
-		020AC3C72F2EDB8300E92F80 /* MWDATCore */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 020AC3C42F2EDB8300E92F80 /* XCRemoteSwiftPackageReference "meta-wearables-dat-ios" */;
-			productName = MWDATCore;
-		};
-		020AC3C92F2EDB8300E92F80 /* MWDATMockDevice */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 020AC3C42F2EDB8300E92F80 /* XCRemoteSwiftPackageReference "meta-wearables-dat-ios" */;
-			productName = MWDATMockDevice;
-		};
-/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 600 /* Project object */;
 }

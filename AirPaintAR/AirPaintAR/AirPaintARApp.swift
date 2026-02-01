@@ -33,6 +33,6 @@ class AppState: ObservableObject {
     @Published var handTracked = false
 
     // Server connection settings
-    @Published var serverHost = "192.168.1.100"  // Default, user should change
+    @Published var serverHost = "172.20.10.7"
     @Published var serverPort = 8765
 }

@@ -19,12 +19,17 @@ struct ARDrawingView: UIViewRepresentable {
         arView.autoenablesDefaultLighting = true
         arView.automaticallyUpdatesLighting = true
 
+        // Debug stats (disable feature points - only show drawing)
+        arView.showsStatistics = false
+        // arView.debugOptions = [.showFeaturePoints]  // Disabled - too noisy
+
         // Configure AR session
         let configuration = ARWorldTrackingConfiguration()
         configuration.planeDetection = []  // Don't detect planes
 
         // Add ArUco marker as reference image for detection
         if let markerImage = createArUcoMarkerImage() {
+            print("✅ ArUco marker image loaded: \(markerImage.width)x\(markerImage.height)")
             let referenceImage = ARReferenceImage(
                 markerImage,
                 orientation: .up,
@@ -33,8 +38,12 @@ struct ARDrawingView: UIViewRepresentable {
             referenceImage.name = "ArUcoMarker0"
             configuration.detectionImages = [referenceImage]
             configuration.maximumNumberOfTrackedImages = 1
+            print("✅ Image detection configured with 1 reference image")
+        } else {
+            print("❌ Failed to load ArUco marker image!")
         }
 
+        print("🚀 Starting AR session...")
         arView.session.run(configuration)
 
         // Store reference for updates
@@ -87,21 +96,60 @@ struct ARDrawingView: UIViewRepresentable {
         private var markerAnchorNode: SCNNode?
         private var markerTransform: simd_float4x4?
 
+        // MARK: - ARSessionDelegate
+
+        func session(_ session: ARSession, didFailWithError error: Error) {
+            print("❌ AR Session failed: \(error.localizedDescription)")
+        }
+
+        func sessionWasInterrupted(_ session: ARSession) {
+            print("⚠️ AR Session interrupted")
+        }
+
+        func sessionInterruptionEnded(_ session: ARSession) {
+            print("✅ AR Session interruption ended")
+        }
+
         // MARK: - ARSCNViewDelegate
 
         func renderer(_ renderer: SCNSceneRenderer, didAdd node: SCNNode, for anchor: ARAnchor) {
             if let imageAnchor = anchor as? ARImageAnchor {
                 // ArUco marker detected by ARKit
-                print("Marker detected: \(imageAnchor.referenceImage.name ?? "unknown")")
+                print("🎯 MARKER DETECTED: \(imageAnchor.referenceImage.name ?? "unknown")")
                 markerAnchorNode = node
                 markerTransform = imageAnchor.transform
 
                 // Add visual indicator on marker
                 let plane = SCNPlane(width: 0.16, height: 0.16)
-                plane.firstMaterial?.diffuse.contents = UIColor.green.withAlphaComponent(0.3)
+                plane.firstMaterial?.diffuse.contents = UIColor.green.withAlphaComponent(0.5)
                 let planeNode = SCNNode(geometry: plane)
                 planeNode.eulerAngles.x = -.pi / 2
                 node.addChildNode(planeNode)
+
+                // Add axes to show orientation
+                let axisLength: CGFloat = 0.1
+                // X axis - red
+                let xAxis = SCNCylinder(radius: 0.002, height: axisLength)
+                xAxis.firstMaterial?.diffuse.contents = UIColor.red
+                let xNode = SCNNode(geometry: xAxis)
+                xNode.position = SCNVector3(Float(axisLength/2), 0, 0)
+                xNode.eulerAngles.z = -.pi / 2
+                node.addChildNode(xNode)
+                // Y axis - green
+                let yAxis = SCNCylinder(radius: 0.002, height: axisLength)
+                yAxis.firstMaterial?.diffuse.contents = UIColor.green
+                let yNode = SCNNode(geometry: yAxis)
+                yNode.position = SCNVector3(0, Float(axisLength/2), 0)
+                node.addChildNode(yNode)
+                // Z axis - blue
+                let zAxis = SCNCylinder(radius: 0.002, height: axisLength)
+                zAxis.firstMaterial?.diffuse.contents = UIColor.blue
+                let zNode = SCNNode(geometry: zAxis)
+                zNode.position = SCNVector3(0, 0, Float(axisLength/2))
+                zNode.eulerAngles.x = .pi / 2
+                node.addChildNode(zNode)
+
+                print("✅ Added marker visualization with axes")
             }
         }
 
@@ -114,10 +162,16 @@ struct ARDrawingView: UIViewRepresentable {
         // MARK: - Point Rendering
 
         func addPoint(_ point: SIMD3<Float>, strokeId: Int, color: UIColor = .red) {
-            guard let arView = arView else { return }
+            guard let arView = arView else {
+                print("❌ addPoint: arView is nil")
+                return
+            }
+
+            print("📍 Received point: (\(point.x), \(point.y), \(point.z)) stroke=\(strokeId)")
 
             // Transform point from Mac's coordinate system to ARKit
             let transformedPoint = transformPointToARKit(point)
+            print("   Transformed to: (\(transformedPoint.x), \(transformedPoint.y), \(transformedPoint.z))")
 
             // Get or create stroke parent node
             let strokeNode: SCNNode

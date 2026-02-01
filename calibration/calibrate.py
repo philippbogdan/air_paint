@@ -6,11 +6,12 @@ Usage:
     python -m calibration.calibrate
 
 The script automatically captures frames when chessboard is detected
-in both cameras for 0.5 seconds continuously. Captures 30 samples,
-then auto-calibrates and saves.
+in both cameras for 0.5 seconds continuously. Keeps capturing until
+you press S to save and calibrate.
 
 Controls:
-    Q - Quit early
+    S - Stop capturing, calibrate and save
+    Q - Quit without saving
 """
 
 import cv2
@@ -86,12 +87,13 @@ def run_calibration(camera_a: int = None, camera_b: int = None, interactive: boo
     print("  - Hold chessboard visible to BOTH cameras")
     print("  - Keep steady for 0.5s to auto-capture")
     print("  - Move to different position/angle, repeat")
-    print("  - 30 samples will be captured automatically")
-    print("  - Press Q to quit early")
+    print("  - Capture as many samples as you want (minimum 15)")
+    print("  - Press S to stop and save calibration")
+    print("  - Press Q to quit without saving")
     print()
 
     # Auto-capture settings
-    TARGET_FRAMES = 30
+    MIN_FRAMES = 15  # Minimum frames needed for calibration
     HOLD_TIME = 0.5  # seconds to hold steady before capture
     MIN_MOVE_TIME = 0.3  # minimum time between captures to ensure different poses
 
@@ -144,38 +146,13 @@ def run_calibration(camera_a: int = None, camera_b: int = None, interactive: boo
                     corners_b_list.append(pair[1])
                     last_capture_time = current_time
                     detection_start_time = None  # Reset for next capture
-                    last_message = f"Captured {len(corners_a_list)}/{TARGET_FRAMES} - move to new position"
+                    count = len(corners_a_list)
+                    if count < MIN_FRAMES:
+                        last_message = f"Captured {count}/{MIN_FRAMES} min - move to new position"
+                    else:
+                        last_message = f"Captured {count} samples - press S to save, or continue"
                     message_color = (0, 255, 0)
                     print(last_message)
-
-                    # Check if we have enough frames
-                    if len(corners_a_list) >= TARGET_FRAMES:
-                        capturing_done = True
-                        last_message = "Running calibration..."
-                        print(f"\n{last_message}")
-
-                        calibration = calibrate_stereo(
-                            corners_a_list,
-                            corners_b_list,
-                            detector,
-                            capture.resolution
-                        )
-
-                        if calibration is not None:
-                            last_message = f"RMS: {calibration.rms_error:.4f}"
-                            if calibration.rms_error < 1.0:
-                                message_color = (0, 255, 0)
-                                save_calibration(calibration)
-                                print(f"Calibration saved! RMS: {calibration.rms_error:.4f}")
-                                last_message = f"Saved! RMS: {calibration.rms_error:.4f} - Press Q to quit"
-                            else:
-                                message_color = (0, 165, 255)
-                                save_calibration(calibration)
-                                print(f"Calibration saved (high RMS: {calibration.rms_error:.4f})")
-                                last_message = f"Saved (high RMS: {calibration.rms_error:.4f}) - Press Q"
-                        else:
-                            last_message = "Calibration failed!"
-                            message_color = (0, 0, 255)
             else:
                 # Lost detection, reset timer
                 detection_start_time = None
@@ -210,9 +187,11 @@ def run_calibration(camera_a: int = None, camera_b: int = None, interactive: boo
             display_b = draw_status(display_b, f"Camera B: {status_b}")
 
             # Add frame count
+            count = len(corners_a_list)
+            count_color = (0, 255, 0) if count >= MIN_FRAMES else (255, 255, 0)
             cv2.putText(
-                display_a, f"Frames: {len(corners_a_list)}/{TARGET_FRAMES}",
-                (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2
+                display_a, f"Frames: {count} (min {MIN_FRAMES})",
+                (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, count_color, 2
             )
 
             if last_message:
@@ -236,11 +215,46 @@ def run_calibration(camera_a: int = None, camera_b: int = None, interactive: boo
             combined = np.hstack([display_a, display_b])
             cv2.imshow("Stereo Calibration", combined)
 
-            # Handle input (only Q to quit)
+            # Handle input
             key = cv2.waitKey(1) & 0xFF
 
             if key == ord('q'):
+                print("\nQuit without saving.")
                 break
+
+            if key == ord('s'):
+                # Save and calibrate
+                if len(corners_a_list) < MIN_FRAMES:
+                    last_message = f"Need at least {MIN_FRAMES} frames! Have {len(corners_a_list)}"
+                    message_color = (0, 0, 255)
+                    print(last_message)
+                else:
+                    capturing_done = True
+                    last_message = "Running calibration..."
+                    print(f"\n{last_message}")
+
+                    calibration = calibrate_stereo(
+                        corners_a_list,
+                        corners_b_list,
+                        detector,
+                        capture.resolution
+                    )
+
+                    if calibration is not None:
+                        last_message = f"RMS: {calibration.rms_error:.4f}"
+                        if calibration.rms_error < 1.0:
+                            message_color = (0, 255, 0)
+                            save_calibration(calibration)
+                            print(f"Calibration saved! RMS: {calibration.rms_error:.4f}")
+                            last_message = f"Saved! RMS: {calibration.rms_error:.4f} - Press Q to quit"
+                        else:
+                            message_color = (0, 165, 255)
+                            save_calibration(calibration)
+                            print(f"Calibration saved (high RMS: {calibration.rms_error:.4f})")
+                            last_message = f"Saved (high RMS: {calibration.rms_error:.4f}) - Press Q"
+                    else:
+                        last_message = "Calibration failed!"
+                        message_color = (0, 0, 255)
 
     finally:
         capture.release()
