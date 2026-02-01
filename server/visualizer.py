@@ -23,16 +23,68 @@ class ServerVisualizer:
     def __init__(self, window_name: str = "Air Paint Server"):
         self.window_name = window_name
         self.window_created = False
+        self.fullscreen_mode = False  # Single camera fullscreen after ArUco lock
 
         # Stroke storage for 2D projection
         self.strokes: Dict[int, List[np.ndarray]] = {}  # stroke_id -> list of 3D points
         self.current_marker_pose: Optional[Tuple[np.ndarray, np.ndarray]] = None  # (rvec, tvec)
 
-    def setup(self):
+        # Get screen dimensions
+        self.screen_width = 1920  # Default
+        self.screen_height = 1080
+        self._detect_screen_size()
+
+    def _detect_screen_size(self):
+        """Detect Mac screen size."""
+        try:
+            # Try using AppKit on macOS
+            from AppKit import NSScreen
+            screen = NSScreen.mainScreen()
+            frame = screen.frame()
+            self.screen_width = int(frame.size.width)
+            self.screen_height = int(frame.size.height)
+        except ImportError:
+            # Fallback - try system_profiler
+            try:
+                import subprocess
+                result = subprocess.run(
+                    ['system_profiler', 'SPDisplaysDataType'],
+                    capture_output=True, text=True
+                )
+                for line in result.stdout.split('\n'):
+                    if 'Resolution' in line:
+                        # Parse "Resolution: 2560 x 1600 Retina"
+                        parts = line.split(':')[1].strip().split()
+                        if len(parts) >= 3:
+                            self.screen_width = int(parts[0])
+                            self.screen_height = int(parts[2])
+                        break
+            except Exception:
+                pass  # Use defaults
+
+    def setup(self, fullscreen: bool = False):
         """Create the display window."""
         cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
-        cv2.resizeWindow(self.window_name, 1280, 480)
+        if fullscreen:
+            cv2.resizeWindow(self.window_name, self.screen_width, self.screen_height)
+            cv2.moveWindow(self.window_name, 0, 0)
+        else:
+            cv2.resizeWindow(self.window_name, 1280, 480)
         self.window_created = True
+        self.fullscreen_mode = fullscreen
+
+    def set_fullscreen(self, enable: bool = True):
+        """Switch to fullscreen single-camera mode."""
+        if not self.window_created:
+            self.setup(fullscreen=enable)
+            return
+
+        self.fullscreen_mode = enable
+        if enable:
+            cv2.resizeWindow(self.window_name, self.screen_width, self.screen_height)
+            cv2.moveWindow(self.window_name, 0, 0)
+        else:
+            cv2.resizeWindow(self.window_name, 1280, 480)
 
     def add_stroke_point(self, point_3d: np.ndarray, stroke_id: int) -> None:
         """
@@ -165,7 +217,7 @@ class ServerVisualizer:
             scale_x = 1.0
             scale_y = 1.0
 
-        # Draw index finger tip
+        # Draw index finger tip only - purple dot
         if hasattr(hand, 'index_finger_tip') and hand.index_finger_tip is not None:
             tip = hand.index_finger_tip
             # tip is in PIXEL coords, scale to display size
@@ -176,26 +228,9 @@ class ServerVisualizer:
             x = max(0, min(x, display_w - 1))
             y = max(0, min(y, display_h - 1))
 
-            # Draw crosshair
-            cv2.circle(frame, (x, y), 15, color, 2)
-            cv2.circle(frame, (x, y), 5, color, -1)
-            cv2.line(frame, (x - 20, y), (x + 20, y), color, 2)
-            cv2.line(frame, (x, y - 20), (x, y + 20), color, 2)
-
-            # Show confidence
-            conf_text = f"{hand.confidence:.0%}"
-            cv2.putText(frame, conf_text, (x + 20, y - 10),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-
-        # Draw all landmarks if available
-        if hasattr(hand, 'landmarks') and hand.landmarks is not None:
-            for i, lm in enumerate(hand.landmarks):
-                x = int(lm[0] * scale_x)
-                y = int(lm[1] * scale_y)
-                # Clamp to frame bounds
-                x = max(0, min(x, display_w - 1))
-                y = max(0, min(y, display_h - 1))
-                cv2.circle(frame, (x, y), 3, (255, 255, 255), -1)
+            # Draw purple filled circle
+            purple = (255, 0, 255)  # BGR purple
+            cv2.circle(frame, (x, y), 10, purple, -1)
 
         return frame
 
@@ -316,24 +351,42 @@ class ServerVisualizer:
             True otherwise
         """
         if not self.window_created:
-            self.setup()
+            self.setup(fullscreen=dynamic_calibrated)
+
+        # Switch to fullscreen when ArUco is locked
+        if dynamic_calibrated and not self.fullscreen_mode:
+            self.set_fullscreen(True)
+        elif not dynamic_calibrated and self.fullscreen_mode:
+            self.set_fullscreen(False)
 
         # Create placeholder if no frame
         placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
         cv2.putText(placeholder, "Waiting for frames...", (150, 240),
                    cv2.FONT_HERSHEY_SIMPLEX, 1, (100, 100, 100), 2)
 
-        # Process glasses frame
+        # Determine display size based on mode
+        if self.fullscreen_mode:
+            # Full screen - use screen dimensions with proper aspect ratio
+            display_w = self.screen_width
+            display_h = self.screen_height
+        else:
+            # Split view - each camera gets 640x480
+            display_w = 640
+            display_h = 480
+
+        # Process glasses frame (main camera)
         if frame_glasses is not None:
             orig_h, orig_w = frame_glasses.shape[:2]
-            display_glasses = cv2.resize(frame_glasses.copy(), (640, 480))
+            display_glasses = cv2.resize(frame_glasses.copy(), (display_w, display_h))
             display_glasses = self.draw_hand_overlay(
                 display_glasses, hand_glasses, (0, 255, 0),
                 original_size=(orig_w, orig_h)
             )
-            display_glasses = self.draw_marker_overlay(
-                display_glasses, marker_visible_glasses, camera_label="MARKER A"
-            )
+            if not self.fullscreen_mode:
+                # Only show marker overlay in setup mode
+                display_glasses = self.draw_marker_overlay(
+                    display_glasses, marker_visible_glasses, camera_label="MARKER A"
+                )
             # Draw 2D stroke projection on glasses frame
             if K_glasses is not None and D_glasses is not None:
                 display_glasses = self.draw_strokes_2d(
@@ -341,49 +394,55 @@ class ServerVisualizer:
                     original_size=(orig_w, orig_h)
                 )
             display_glasses = self.draw_status_overlay(
-                display_glasses, "CAMERA A",
+                display_glasses, "CAMERA A" if not self.fullscreen_mode else "",
                 hand_glasses is not None, fps
             )
             display_glasses = self.draw_calibration_overlay(
                 display_glasses, calibration_mode, dynamic_calibrated
             )
         else:
-            display_glasses = placeholder.copy()
-            cv2.putText(display_glasses, "CAMERA A", (250, 50),
+            display_glasses = cv2.resize(placeholder.copy(), (display_w, display_h))
+            cv2.putText(display_glasses, "CAMERA A", (display_w // 2 - 80, 50),
                        cv2.FONT_HERSHEY_SIMPLEX, 1, (100, 100, 100), 2)
             if calibration_mode:
                 display_glasses = self.draw_calibration_overlay(
                     display_glasses, calibration_mode, dynamic_calibrated
                 )
 
-        # Process webcam frame
-        if frame_webcam is not None:
-            orig_h, orig_w = frame_webcam.shape[:2]
-            display_webcam = cv2.resize(frame_webcam.copy(), (640, 480))
-            display_webcam = self.draw_hand_overlay(
-                display_webcam, hand_webcam, (255, 0, 255),
-                original_size=(orig_w, orig_h)
-            )
-            display_webcam = self.draw_marker_overlay(
-                display_webcam, marker_visible_webcam, camera_label="MARKER B"
-            )
-            display_webcam = self.draw_status_overlay(
-                display_webcam, "CAMERA B",
-                hand_webcam is not None, fps
-            )
-        else:
-            display_webcam = placeholder.copy()
-            cv2.putText(display_webcam, "CAMERA B", (250, 50),
-                       cv2.FONT_HERSHEY_SIMPLEX, 1, (100, 100, 100), 2)
-
         # Drawing indicator
         if is_drawing:
-            cv2.circle(display_glasses, (620, 20), 10, (0, 0, 255), -1)
-            cv2.putText(display_glasses, "REC", (580, 25),
+            indicator_x = display_w - 60
+            cv2.circle(display_glasses, (indicator_x, 20), 10, (0, 0, 255), -1)
+            cv2.putText(display_glasses, "REC", (indicator_x - 40, 25),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
-        # Combine frames side by side
-        combined = np.hstack([display_glasses, display_webcam])
+        if self.fullscreen_mode:
+            # Single camera fullscreen mode
+            combined = display_glasses
+        else:
+            # Dual camera split view (setup mode)
+            # Process webcam frame
+            if frame_webcam is not None:
+                orig_h, orig_w = frame_webcam.shape[:2]
+                display_webcam = cv2.resize(frame_webcam.copy(), (640, 480))
+                display_webcam = self.draw_hand_overlay(
+                    display_webcam, hand_webcam, (255, 0, 255),
+                    original_size=(orig_w, orig_h)
+                )
+                display_webcam = self.draw_marker_overlay(
+                    display_webcam, marker_visible_webcam, camera_label="MARKER B"
+                )
+                display_webcam = self.draw_status_overlay(
+                    display_webcam, "CAMERA B",
+                    hand_webcam is not None, fps
+                )
+            else:
+                display_webcam = placeholder.copy()
+                cv2.putText(display_webcam, "CAMERA B", (250, 50),
+                           cv2.FONT_HERSHEY_SIMPLEX, 1, (100, 100, 100), 2)
+
+            # Combine frames side by side
+            combined = np.hstack([display_glasses, display_webcam])
 
         # Add point count display
         stroke_count = sum(len(pts) for pts in self.strokes.values())
@@ -391,7 +450,7 @@ class ServerVisualizer:
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
 
         # Add help text at bottom
-        help_text = "SPACE: Toggle Draw | c: Recalibrate | q: Quit"
+        help_text = "SPACE: Toggle Draw | S: Save USDZ | c: Recalibrate | q: Quit"
         cv2.putText(combined, help_text, (10, combined.shape[0] - 10),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1)
 
@@ -406,8 +465,101 @@ class ServerVisualizer:
             return "recalibrate"
         if key == ord(' '):  # SPACE - toggle drawing
             return "toggle_drawing"
+        if key == ord('s') or key == ord('S'):  # Save USDZ
+            return "save_usdz"
 
         return True
+
+    def export_to_usdz(self, output_dir: str = "data/exports") -> Optional[str]:
+        """
+        Export current strokes to USDZ file, centered at origin.
+
+        Args:
+            output_dir: Directory to save the USDZ file
+
+        Returns:
+            Path to created USDZ file, or None if export failed
+        """
+        from pathlib import Path
+        import time
+
+        if not self.strokes:
+            print("No strokes to export")
+            return None
+
+        # Collect all points
+        all_points = []
+        for stroke_id, points in self.strokes.items():
+            if len(points) >= 2:
+                all_points.extend(points)
+
+        if not all_points:
+            print("No valid strokes to export")
+            return None
+
+        all_points = np.array(all_points)
+
+        # Points are already in ArUco/world frame (origin at marker center)
+        # Just need to convert strokes to mesh format
+
+        # Create output directory
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        # Generate timestamp filename
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        obj_path = output_path / f"drawing_{timestamp}.obj"
+        usdz_path = output_path / f"drawing_{timestamp}.usdz"
+
+        # Generate tube mesh from strokes
+        try:
+            from export.mesh import generate_tube_vertices, save_obj
+
+            all_vertices = []
+            all_faces = []
+            vertex_offset = 0
+
+            for stroke_id, points in self.strokes.items():
+                if len(points) < 2:
+                    continue
+
+                points_array = np.array(points)
+                vertices, faces = generate_tube_vertices(points_array, radius=3.0, segments=8)
+
+                if len(vertices) > 0:
+                    all_vertices.append(vertices)
+                    all_faces.append(faces + vertex_offset)
+                    vertex_offset += len(vertices)
+
+            if not all_vertices:
+                print("Failed to generate mesh")
+                return None
+
+            vertices = np.vstack(all_vertices)
+            faces = np.vstack(all_faces)
+
+            # Save OBJ (intermediate)
+            save_obj(vertices, faces, obj_path)
+
+            # Convert to USDZ
+            from export.usdz import convert_to_usdz
+            result = convert_to_usdz(obj_path, usdz_path)
+
+            if result:
+                print(f"=" * 50)
+                print(f"USDZ exported: {usdz_path}")
+                print(f"Points: {len(all_points)}, Strokes: {len(self.strokes)}")
+                print(f"=" * 50)
+                return str(usdz_path)
+            else:
+                print(f"USDZ conversion failed, OBJ saved: {obj_path}")
+                return str(obj_path)
+
+        except Exception as e:
+            print(f"Export error: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
 
     def cleanup(self):
         """Clean up windows."""

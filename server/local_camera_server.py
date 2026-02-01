@@ -575,7 +575,42 @@ class LocalCameraServer:
             self._on_hid_button()  # Use two-phase logic
             return True
 
+        if result == "save_usdz":
+            self._export_drawing()
+            return True
+
+        if result == "recalibrate":
+            self._recalibrate()
+            return True
+
         return result if isinstance(result, bool) else True
+
+    def _export_drawing(self) -> None:
+        """Export current drawing to USDZ."""
+        if not self.visualizer:
+            return
+
+        if not self.visualizer.strokes:
+            print("No strokes to export")
+            return
+
+        print("\n" + "=" * 50)
+        print("Exporting drawing to USDZ...")
+        result = self.visualizer.export_to_usdz()
+        if result:
+            print(f"Export complete: {result}")
+        print("=" * 50 + "\n")
+
+    def _recalibrate(self) -> None:
+        """Reset to setup phase for recalibration."""
+        self.state.phase = "setup"
+        self.state.world_locked = False
+        self.state.locked_T_CW = None
+        self.state.is_drawing = False
+        self.visualizer.clear_strokes()
+        print("\n" + "=" * 50)
+        print("RECALIBRATING - Show ArUco marker and press SPACE")
+        print("=" * 50 + "\n")
 
     async def run(self) -> None:
         """Run the WebSocket server with frame processing loop."""
