@@ -12,7 +12,7 @@ from .protocol import (
     parse_message,
     serialize_message,
 )
-from .websocket_server import AirPaintServer
+from .local_camera_server import LocalCameraServer
 
 __all__ = [
     "MessageType",
@@ -25,5 +25,5 @@ __all__ = [
     "StatusMessage",
     "parse_message",
     "serialize_message",
-    "AirPaintServer",
+    "LocalCameraServer",
 ]

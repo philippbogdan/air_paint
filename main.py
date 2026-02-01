@@ -7,8 +7,9 @@ A macOS Python app for "3D air painting" using stereo vision from two cameras
 toggled by spacebar or Bluetooth shutter button.
 
 Usage:
-    python main.py [--calibrate] [--camera-a INDEX] [--camera-b INDEX]
-    python main.py --server-local [--port 8765] [--camera-a 0] [--camera-b 1]  # WebSocket server with local cameras
+    python main.py                           # Run server (default, for iPhone AR viewer)
+    python main.py --calibrate               # Calibrate cameras
+    python main.py --standalone              # Mac-only mode (no iPhone)
 
 Controls:
     SPACE - Toggle drawing on/off
@@ -525,15 +526,15 @@ def main():
         help="Interactively select cameras with visual preview"
     )
     parser.add_argument(
-        "--server-local",
+        "--standalone",
         action="store_true",
-        help="Run as WebSocket server with local dual cameras (iPhone is viewer only)"
+        help="Run in standalone Mac-only mode (no iPhone AR viewer)"
     )
     parser.add_argument(
         "--port",
         type=int,
         default=8765,
-        help="WebSocket server port (default: 8765, only used with --server-local)"
+        help="WebSocket server port (default: 8765)"
     )
 
     args = parser.parse_args()
@@ -571,31 +572,7 @@ def main():
         run_calibration(camera_a=cam_a, camera_b=cam_b, interactive=args.interactive)
         return
 
-    if args.server_local:
-        # Run WebSocket server with local dual cameras
-        import asyncio
-        from server.local_camera_server import LocalCameraServer
-
-        server = LocalCameraServer(
-            port=args.port,
-            camera_a_index=args.camera_a,
-            camera_b_index=args.camera_b
-        )
-
-        if not server.setup():
-            print("Server setup failed!")
-            return
-
-        try:
-            asyncio.run(server.run())
-        except KeyboardInterrupt:
-            print("\nInterrupted by user")
-        finally:
-            server.stop()
-            server.cleanup()
-        return
-
-    # Camera selection
+    # Camera selection (used by both modes)
     cam_a = args.camera_a
     cam_b = args.camera_b
     manually_specified = not (cam_a == CAMERA.CAMERA_A_INDEX and cam_b == CAMERA.CAMERA_B_INDEX)
@@ -617,19 +594,43 @@ def main():
     print(f"\nUsing: Camera A={cam_a} ({camera_names.get(cam_a, 'Unknown')})")
     print(f"       Camera B={cam_b} ({camera_names.get(cam_b, 'Unknown')})")
 
-    # Run main application
-    app = AirPaintingApp(
+    if args.standalone:
+        # Run standalone Mac-only mode (no iPhone)
+        app = AirPaintingApp(
+            camera_a_index=cam_a,
+            camera_b_index=cam_b
+        )
+
+        try:
+            if app.setup():
+                app.run()
+        except KeyboardInterrupt:
+            print("\nInterrupted by user")
+        finally:
+            app.cleanup()
+        return
+
+    # Default: Run WebSocket server for iPhone AR viewer
+    import asyncio
+    from server.local_camera_server import LocalCameraServer
+
+    server = LocalCameraServer(
+        port=args.port,
         camera_a_index=cam_a,
         camera_b_index=cam_b
     )
 
+    if not server.setup():
+        print("Server setup failed!")
+        return
+
     try:
-        if app.setup():
-            app.run()
+        asyncio.run(server.run())
     except KeyboardInterrupt:
         print("\nInterrupted by user")
     finally:
-        app.cleanup()
+        server.stop()
+        server.cleanup()
 
 
 if __name__ == "__main__":
